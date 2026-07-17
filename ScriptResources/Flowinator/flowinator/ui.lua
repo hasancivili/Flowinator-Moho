@@ -347,7 +347,7 @@ local function version_row(entry, prefix, live_entry)
 	local width = prefix == "V" and "%s%04d" or "%s%03d"
 	local live = live_entry and live_entry.version == version and "Live" or "-"
 	if prefix == "P" then
-		return string.format("%-12s     %-20s     %-28s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 28), live)
+		return string.format("%-12s     %-20s     %-35s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 35), live)
 	end
 	return string.format("%-12s     %-20s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 28))
 end
