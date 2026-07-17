@@ -71,7 +71,8 @@ local MSG_DYNAMIC_TYPE_BASE = 51000
 
 -- Keep the fixed native Moho dialog compact while leaving a small gutter after actions.
 local BROWSER_LIST_WIDTH = 110
-local VERSION_LIST_WIDTH = 430
+local CURRENT_PROJECT_TEXT_WIDTH = 240
+local VERSION_LIST_WIDTH = 390
 
 local state = {
 	project = nil,
@@ -346,9 +347,9 @@ local function version_row(entry, prefix, live_entry)
 	local width = prefix == "V" and "%s%04d" or "%s%03d"
 	local live = live_entry and live_entry.version == version and "Live" or "-"
 	if prefix == "P" then
-		return string.format("%-12s     %-20s     %-38s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 38), live)
+		return string.format("%-12s     %-20s     %-28s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 28), live)
 	end
-	return string.format("%-12s     %-20s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 44))
+	return string.format("%-12s     %-20s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 28))
 end
 
 local function add_banner(layout)
@@ -1061,9 +1062,9 @@ function FlowinatorDialog:new(moho)
 	add_label(l, "CURRENT PROJECT")
 	l:PushH()
 	l:PushV(LM.GUI.ALIGN_TOP)
-	d.projectStatus = add_dynamic(l, "No project selected", 280)
-	d.projectNotesStatus = add_dynamic(l, "", 340)
-	d.projectPathStatus = add_dynamic(l, "", 340)
+	d.projectStatus = add_dynamic(l, "No project selected", CURRENT_PROJECT_TEXT_WIDTH)
+	d.projectNotesStatus = add_dynamic(l, "", CURRENT_PROJECT_TEXT_WIDTH)
+	d.projectPathStatus = add_dynamic(l, "", CURRENT_PROJECT_TEXT_WIDTH)
 	l:Pop()
 	l:PushV(LM.GUI.ALIGN_TOP)
 	local settingsBtn = LM.GUI.Button("Project Settings", MSG_PROJECT_SETTINGS)
@@ -1172,7 +1173,7 @@ function FlowinatorDialog:new(moho)
 	add_button(l, "Delete", MSG_DELETE_WORK_VERSION)
 	l:Pop()
 	add_label(l, "PUBLISH VERSIONS")
-	d.publishVersionHeader = add_dynamic(l, "Version          Author                  Commit                                      Live", VERSION_LIST_WIDTH)
+	d.publishVersionHeader = add_dynamic(l, "Version          Author                  Commit                            Live", VERSION_LIST_WIDTH)
 	d.publishVersionList = LM.GUI.TextList(VERSION_LIST_WIDTH, 75, MSG_PUBLISH_VERSION_SELECTED)
 	l:AddChild(d.publishVersionList, LM.GUI.ALIGN_FILL)
 	l:PushH()
