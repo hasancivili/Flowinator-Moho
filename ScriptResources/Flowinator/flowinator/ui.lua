@@ -1050,10 +1050,8 @@ function FlowinatorDialog:new(moho)
 
 	l:PushV(LM.GUI.ALIGN_TOP)
 	add_label(l, "PROJECT")
-	l:PushH()
 	add_button(l, "New Project", MSG_NEW_PROJECT)
 	add_button(l, "Select Project", MSG_OPEN_PROJECT)
-	l:Pop()
 	l:Pop()
 
 	l:AddChild(LM.GUI.Divider(true), LM.GUI.ALIGN_FILL)
