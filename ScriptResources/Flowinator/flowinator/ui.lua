@@ -14,6 +14,8 @@ local MSG_ADD_USER = 50003
 local MSG_LOGIN = 50004
 local MSG_PROJECT_SETTINGS = 50005
 local MSG_LOGOUT = 50006
+local MSG_RECENT_PROJECT_SELECTED = 50007
+local MSG_OPEN_RECENT_PROJECT = 50008
 local MSG_TYPE_SELECTED = 50010
 local MSG_ADD_TYPE = 50011
 local MSG_MODE_ASSETS = 50012
@@ -71,6 +73,7 @@ local MSG_DYNAMIC_TYPE_BASE = 51000
 -- Keep the fixed native Moho dialog compact while leaving a small gutter after actions.
 local BROWSER_LIST_WIDTH = 110
 local VERSION_LIST_WIDTH = 430
+local RECENT_PROJECT_LIST_WIDTH = 210
 
 local state = {
 	project = nil,
@@ -98,6 +101,7 @@ local state = {
 	work_item_rows = {},
 	work_version_rows = {},
 	publish_version_rows = {},
+	recent_project_rows = {},
 	preview_cache_token = 0,
 	refreshing_lists = false
 }
@@ -1021,6 +1025,10 @@ function FlowinatorDialog:new(moho)
 	add_button(l, "New Project", MSG_NEW_PROJECT)
 	add_button(l, "Select Project", MSG_OPEN_PROJECT)
 	l:Pop()
+	add_label(l, "RECENT PROJECTS")
+	d.recentProjectList = LM.GUI.TextList(RECENT_PROJECT_LIST_WIDTH, 70, MSG_RECENT_PROJECT_SELECTED)
+	l:AddChild(d.recentProjectList, LM.GUI.ALIGN_FILL)
+	add_button(l, "Open", MSG_OPEN_RECENT_PROJECT)
 	l:Pop()
 
 	l:AddChild(LM.GUI.Divider(true), LM.GUI.ALIGN_FILL)
@@ -1158,6 +1166,7 @@ function FlowinatorDialog:new(moho)
 	l:Pop()
 
 	l:Pop()
+	d:refresh_recent_projects()
 	d:refresh()
 	return d
 end
@@ -1168,6 +1177,8 @@ function FlowinatorDialog:HandleMessage(msg)
 		d:new_project()
 	elseif msg == MSG_OPEN_PROJECT then
 		d:open_project()
+	elseif msg == MSG_OPEN_RECENT_PROJECT then
+		d:open_recent_project()
 	elseif msg == MSG_ADD_USER then
 		d:add_user()
 	elseif msg == MSG_LOGIN then
@@ -1336,6 +1347,65 @@ function FlowinatorDialog:load_last_project()
 		self:reset_selection()
 		self:reload_assets()
 	end
+end
+
+function FlowinatorDialog:refresh_recent_projects()
+	if not self.recentProjectList then return end
+	clear_text_list(self.recentProjectList)
+	state.recent_project_rows = {}
+	local recent = Project.local_state().recent_projects or {}
+	local seen = {}
+	local selected_index = 0
+
+	for _, root in ipairs(recent) do
+		if root and root ~= "" and not seen[root] then
+			seen[root] = true
+			local project = Project.open(root)
+			if project then
+				local code = project.code or ""
+				local label = project.name or "Untitled"
+				if code ~= "" then label = label .. " [" .. code .. "]" end
+				table.insert(state.recent_project_rows, {root = root, label = label})
+				call_method(self.recentProjectList, "AddItem", label, false)
+				if state.project and state.project.root == root then
+					selected_index = #state.recent_project_rows - 1
+				end
+			end
+		end
+	end
+
+	if #state.recent_project_rows > 0 then
+		call_method(self.recentProjectList, "SetSelItem", selected_index, false)
+	end
+	call_method(self.recentProjectList, "Redraw")
+end
+
+function FlowinatorDialog:activate_project(root, project)
+	project = project or Project.open(root)
+	if not project then
+		alert("Project metadata was not found.")
+		return false
+	end
+	project.root = root
+	state.project = project
+	Project.remember(root)
+	state.current_user = Users.current(root)
+	state.selected_type = nil
+	self:reset_selection()
+	self:reload_assets()
+	self:refresh_recent_projects()
+	self:refresh()
+	return true
+end
+
+function FlowinatorDialog:open_recent_project()
+	local index = call_method(self.recentProjectList, "SelItem") or -1
+	local row = state.recent_project_rows[index + 1]
+	if not row then
+		alert("Select a recent project first.")
+		return
+	end
+	self:activate_project(row.root)
 end
 
 function FlowinatorDialog:ensure_default_selection()
@@ -1567,13 +1637,8 @@ function FlowinatorDialog:new_project()
 		alert("Location and Project Name are required.")
 		return
 	end
-	state.project = Project.create(location, result.name, result.code, result.notes)
-	Project.remember(state.project.root)
-	state.current_user = nil
-	state.selected_type = nil
-	self:reset_selection()
-	self:reload_assets()
-	self:refresh()
+	local project = Project.create(location, result.name, result.code, result.notes)
+	self:activate_project(project.root, project)
 end
 
 function FlowinatorDialog:open_project()
@@ -1584,19 +1649,7 @@ function FlowinatorDialog:open_project()
 	local root = result.root
 	if root == "" then root = select_folder("Select Project Root") or "" end
 	if root == "" then return end
-	local project = Project.open(root)
-	if not project then
-		alert("Project metadata was not found.")
-		return
-	end
-	state.project = project
-	state.project.root = root
-	Project.remember(root)
-	state.current_user = Users.current(root)
-	state.selected_type = nil
-	self:reset_selection()
-	self:reload_assets()
-	self:refresh()
+	self:activate_project(root)
 end
 
 function FlowinatorDialog:add_user()
