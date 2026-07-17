@@ -70,7 +70,7 @@ local MSG_DYNAMIC_TYPE_BASE = 51000
 
 -- Keep the fixed native Moho dialog compact while leaving a small gutter after actions.
 local BROWSER_LIST_WIDTH = 110
-local VERSION_LIST_WIDTH = 480
+local VERSION_LIST_WIDTH = 430
 
 local state = {
 	project = nil,
@@ -345,7 +345,7 @@ local function version_row(entry, prefix, live_entry)
 	local width = prefix == "V" and "%s%04d" or "%s%03d"
 	local live = live_entry and live_entry.version == version and "Live" or "-"
 	if prefix == "P" then
-		return string.format("%-12s     %-20s     %-44s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 44), live)
+		return string.format("%-12s     %-20s     %-38s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 38), live)
 	end
 	return string.format("%-12s     %-20s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 44))
 end
