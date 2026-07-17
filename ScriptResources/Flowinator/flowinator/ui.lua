@@ -72,7 +72,7 @@ local MSG_DYNAMIC_TYPE_BASE = 51000
 -- Keep the fixed native Moho dialog compact while leaving a small gutter after actions.
 local BROWSER_LIST_WIDTH = 110
 local CURRENT_PROJECT_TEXT_WIDTH = 240
-local VERSION_LIST_WIDTH = 390
+local VERSION_LIST_WIDTH = 260
 
 local state = {
 	project = nil,
