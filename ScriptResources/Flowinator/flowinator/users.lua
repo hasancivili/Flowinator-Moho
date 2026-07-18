@@ -21,8 +21,42 @@ local function users_path(root)
 	return Paths.join(root, "00_Pipeline", "Metadata", "users.json")
 end
 
-local function state_path(root)
-	return Paths.join(root, "00_Pipeline", "Metadata", "session.json")
+local function local_sessions_path()
+	local base = os.getenv("APPDATA") or os.getenv("HOME") or "."
+	return Paths.join(base, "Flowinator", "flowinator_sessions.json")
+end
+
+local function same_root(a, b)
+	local left = Paths.normalize(a or "")
+	local right = Paths.normalize(b or "")
+	if package.config:sub(1, 1) == "\\" then
+		left = left:lower()
+		right = right:lower()
+	end
+	return left == right
+end
+
+local function local_session(root)
+	local data = Metadata.read(local_sessions_path(), {projects = {}})
+	data.projects = data.projects or {}
+	for _, entry in ipairs(data.projects) do
+		if same_root(entry.root, root) then
+			return data, entry
+		end
+	end
+	return data, nil
+end
+
+local function save_local_session(root, username)
+	if not root or root == "" then return false end
+	local data, entry = local_session(root)
+	if not entry then
+		entry = {root = root}
+		table.insert(data.projects, entry)
+	end
+	entry.current_user = username or ""
+	entry.logged_in = username and username ~= "" and os.date("%Y-%m-%d %H:%M:%S") or ""
+	return Metadata.write(local_sessions_path(), data)
 end
 
 function Users.load(root)
@@ -152,7 +186,7 @@ function Users.delete(root, username, actor)
 	if current_user == username and current_root == root then
 		current_user = nil
 		current_root = nil
-		Metadata.write(state_path(root), {current_user = "", logged_in = ""})
+		save_local_session(root, "")
 	end
 	return true
 end
@@ -161,7 +195,7 @@ function Users.clear_current(root)
 	current_user = nil
 	current_root = nil
 	if root then
-		Metadata.write(state_path(root), {current_user = "", logged_in = ""})
+		save_local_session(root, "")
 	end
 end
 
@@ -174,7 +208,7 @@ function Users.login(root, username, password)
 		if user.username == username and user.password == password then
 			current_user = username
 			current_root = root
-			Metadata.write(state_path(root), {current_user = username, logged_in = os.date("%Y-%m-%d %H:%M:%S")})
+			save_local_session(root, username)
 			return true
 		end
 	end
@@ -183,15 +217,23 @@ end
 
 function Users.current(root)
 	if current_user and current_root == root then
-		return current_user
+		if Users.find(root, current_user) then
+			return current_user
+		end
+		current_user = nil
+		current_root = nil
 	end
-	local state = Metadata.read(state_path(root), nil)
-	if state then
-		current_user = state.current_user
+	local _, session = local_session(root)
+	local username = session and session.current_user or ""
+	if username ~= "" and Users.find(root, username) then
+		current_user = username
 		current_root = root
 	else
 		current_user = nil
 		current_root = nil
+		if username ~= "" then
+			save_local_session(root, "")
+		end
 	end
 	return current_user
 end
