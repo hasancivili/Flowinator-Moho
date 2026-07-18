@@ -347,9 +347,13 @@ local function version_row(entry, prefix, live_entry)
 	local width = prefix == "V" and "%s%04d" or "%s%03d"
 	local live = live_entry and live_entry.version == version and "Live" or "-"
 	if prefix == "P" then
-		return string.format("%-12s     %-20s     %-33s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 33), live)
+		return string.format("%-12s     %-24s     %s", string.format(width, prefix, version), clip(author, 24), live)
 	end
 	return string.format("%-12s     %-20s     %s", string.format(width, prefix, version), clip(author, 20), clip(comment, 28))
+end
+
+local function publish_version_header()
+	return string.format("%-12s     %-24s     %s", "Version", "Author", "Live")
 end
 
 local function add_banner(layout)
@@ -1156,6 +1160,7 @@ function FlowinatorDialog:new(moho)
 	d.assetName = add_dynamic(l, "No asset selected", 250)
 	d.assetMeta = add_dynamic(l, "", 250)
 	d.versionInfo = add_dynamic(l, "Selected: none", 250)
+	d.publishCommitInfo = add_dynamic(l, "", 250)
 	d.previewInfo = add_dynamic(l, "Preview: none", 240)
 	l:PushH()
 	add_button(l, "Show Preview", MSG_SHOW_PREVIEW)
@@ -1171,7 +1176,7 @@ function FlowinatorDialog:new(moho)
 	add_button(l, "Delete", MSG_DELETE_WORK_VERSION)
 	l:Pop()
 	add_label(l, "PUBLISH VERSIONS")
-	d.publishVersionHeader = add_dynamic(l, "Version          Author                  Commit                            Live", VERSION_LIST_WIDTH)
+	d.publishVersionHeader = add_dynamic(l, publish_version_header(), VERSION_LIST_WIDTH)
 	d.publishVersionList = LM.GUI.TextList(VERSION_LIST_WIDTH, 75, MSG_PUBLISH_VERSION_SELECTED)
 	l:AddChild(d.publishVersionList, LM.GUI.ALIGN_FILL)
 	l:PushH()
@@ -2866,6 +2871,7 @@ function FlowinatorDialog:refresh_details()
 		set_text(self.assetMeta, "")
 		set_text(self.previewInfo, "Preview: none")
 		set_text(self.versionInfo, "Selected: none")
+		set_text(self.publishCommitInfo, "")
 		return
 	end
 
@@ -2892,11 +2898,14 @@ function FlowinatorDialog:refresh_details()
 	if kind == "publish" and entry then
 		local live = Versions.live_publish_entry(asset)
 		set_text(self.versionInfo, string.format("Selected Publish: P%03d | Latest Publish: %s | Live: %s", entry.version or 0, publish_label(Versions.latest_publish_version(asset)), live and publish_label(live.version or 0) or "-"))
+		set_text(self.publishCommitInfo, "Commit: " .. ((entry.comment and entry.comment ~= "") and entry.comment or "-"))
 	elseif entry then
 		set_text(self.versionInfo, string.format("Selected Work: V%04d | Latest Work: %s", entry.version or 0, work_label(asset.latest_version or 0)))
+		set_text(self.publishCommitInfo, "")
 	else
 		local live = Versions.live_publish_entry(asset)
 		set_text(self.versionInfo, string.format("Latest Work: %s | Latest Publish: %s | Live: %s", work_label(asset.latest_version or 0), publish_label(Versions.latest_publish_version(asset)), live and publish_label(live.version or 0) or "-"))
+		set_text(self.publishCommitInfo, "")
 	end
 end
 
