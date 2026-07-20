@@ -277,6 +277,58 @@ function Versions.save_new(root, asset, moho, user, comment)
 	return path
 end
 
+function Versions.publish_new_work(root, asset, moho, user)
+	local work_comment = "Published Version"
+	local work_path, err
+	if #(asset.workfiles or {}) == 0 then
+		work_path, err = Versions.create_workfile(root, asset, moho, user, work_comment)
+	else
+		work_path, err = Versions.save_new(root, asset, moho, user, work_comment)
+	end
+	if not work_path then
+		return nil, err
+	end
+
+	local work_version = asset.latest_version or 0
+	local publishes = asset.publishes or {}
+	local publish_version = #publishes + 1
+	local folder = publish_folder(root, asset)
+	Paths.mkdir(folder)
+	local publish_path = Paths.join(folder, publish_name(asset, publish_version))
+	local live_path = Paths.join(folder, live_publish_name(asset))
+	if not Paths.copy_file(work_path, publish_path) then
+		return nil, "Could not create the Publish Version from the new workfile."
+	end
+	if not Paths.copy_file(publish_path, live_path) then
+		return nil, "Could not update Live Publish."
+	end
+
+	local publish_comment = string.format("Published from V%04d", work_version)
+	asset.publishes = publishes
+	table.insert(asset.publishes, {
+		version = publish_version,
+		path = meta_path(root, publish_path),
+		author = user or "",
+		created = os.date("%Y-%m-%d %H:%M:%S"),
+		comment = publish_comment,
+		preview_path = ""
+	})
+	asset.live_publish = {
+		version = publish_version,
+		path = meta_path(root, live_path),
+		updated = os.date("%Y-%m-%d %H:%M:%S"),
+		author = user or "",
+		comment = publish_comment
+	}
+	update_item(root, asset)
+	return {
+		work_path = work_path,
+		work_version = work_version,
+		publish_path = publish_path,
+		publish_version = publish_version
+	}
+end
+
 function Versions.publish(root, asset, moho, user, comment)
 	if (asset.latest_version or 0) == 0 then
 		return nil, "Create a workfile before publishing."

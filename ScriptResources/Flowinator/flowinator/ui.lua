@@ -2402,13 +2402,13 @@ function FlowinatorDialog:publish_version()
 	local user = self:current_user()
 	local asset = self:selected_asset()
 	if not user or not asset then alert("Select an asset first.") return end
-	local commit = ask_commit("Publish")
-	local path, err = with_live_moho(self.moho, function(moho)
-		return Versions.publish(state.project.root, asset, moho, user, commit)
+	local result, err = with_live_moho(self.moho, function(moho)
+		return Versions.publish_new_work(state.project.root, asset, moho, user)
 	end)
-	if not path then alert(err) return end
-	state.selected_version_kind = "publish"
-	state.selected_publish_version = nil
+	if not result then alert(err) return end
+	state.selected_version_kind = "work"
+	state.selected_work_version = result.work_version
+	state.selected_publish_version = result.publish_version
 	self:replace_current_base_item()
 	self:refresh_versions()
 end
