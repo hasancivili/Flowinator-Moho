@@ -26,11 +26,9 @@ function Metadata.write(path, data)
 	if not f then
 		return false
 	end
-	if Json.encode_compact then
-		f:write(Json.encode_compact(data))
-	else
-		f:write(Json.encode(data, 0))
-	end
+	-- Metadata is intentionally human-readable. Files stay small because
+	-- version histories are stored per work item, not in a project-wide blob.
+	f:write(Json.encode(data, 0))
 	f:write("\n")
 	f:close()
 	return true

@@ -1039,7 +1039,7 @@ end
 local FlowinatorDialog = {}
 
 function FlowinatorDialog:new(moho)
-	local d = LM.GUI.SimpleDialog("Flowinator v0.9.2", FlowinatorDialog)
+	local d = LM.GUI.SimpleDialog("Flowinator v0.9.3", FlowinatorDialog)
 	bind_methods(d, FlowinatorDialog)
 	FlowinatorDialog.dialog = d
 	d.moho = moho
@@ -1508,14 +1508,14 @@ function FlowinatorDialog:current_item()
 		local shot = state.shots_by_id[state.selected_shot_id]
 		if not state.selected_work_branch_id then return nil end
 		local branch = shot and Shots.branch(shot, state.selected_work_branch_id)
-		return branch and Shots.branch_item(shot, branch) or nil
+		return branch and Shots.branch_item(state.project.root, shot, branch) or nil
 	end
 	if not state.project or not state.selected_asset_id then return nil end
 	local asset = state.assets_by_id[state.selected_asset_id]
 	local variant = asset and Assets.variant(asset, state.selected_variant_id)
 	if not state.selected_work_branch_id then return nil end
 	local branch = variant and Assets.branch(variant, state.selected_work_branch_id)
-	return branch and Assets.branch_item(asset, variant, branch) or nil
+	return branch and Assets.branch_item(state.project.root, asset, variant, branch) or nil
 end
 
 function FlowinatorDialog:base_asset()

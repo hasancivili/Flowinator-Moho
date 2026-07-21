@@ -482,17 +482,236 @@ function Assets.add_work_item(root, asset, variant, work_type, work_item)
 	return Assets.update(root, asset), branch
 end
 
-function Assets.update(root, updated)
-	updated = Assets.sync_branch_item(updated) or updated
-	local data = Assets.load(root)
-	for i, asset in ipairs(data.assets) do
-		if asset.id == updated.id then
-			data.assets[i] = updated
-			Assets.save(root, data)
-			return true
+-- Per-item metadata storage. The old assets.json remains readable only as a
+-- one-time migration source; normal work never rewrites a project-wide list.
+local function metadata_root(root)
+	return Paths.join(root, "00_Pipeline", "Metadata", "Assets")
+end
+
+local function asset_metadata_folder(root, asset)
+	return Paths.join(metadata_root(root), Assets.type_dir(asset.type), asset.safe_name or Paths.safe_name(asset.name))
+end
+
+local function manifest_path(root, asset)
+	return Paths.join(asset_metadata_folder(root, asset), "asset.json")
+end
+
+local function branch_metadata_path(root, asset, variant, branch)
+	return Paths.join(asset_metadata_folder(root, asset), Paths.safe_name(variant.name or "Default"), Paths.safe_name(branch.work_type), Paths.safe_name(branch.work_item or "Default") .. ".json")
+end
+
+local function type_index_path(root, asset_type)
+	return Paths.join(metadata_root(root), Assets.type_dir(asset_type), "index.json")
+end
+
+local function migration_path(root)
+	return Paths.join(metadata_root(root), ".migration.json")
+end
+
+local function branch_record(branch)
+	return {
+		id = branch.id,
+		work_type = branch.work_type,
+		work_item = branch.work_item or "Default",
+		latest_version = branch.latest_version or 0,
+		version_counter = branch.version_counter or 0,
+		workfiles = branch.workfiles or {},
+		publishes = branch.publishes or {},
+		live_publish = branch.live_publish,
+		preview_path = branch.preview_path or ""
+	}
+end
+
+local function write_branch(root, asset, variant, branch)
+	return Metadata.write(branch_metadata_path(root, asset, variant, branch), branch_record(branch))
+end
+
+local function manifest_record(asset)
+	local variants = {}
+	for _, variant in ipairs(asset.variants or {}) do
+		local branches = {}
+		for _, branch in ipairs(variant.work_branches or {}) do
+			table.insert(branches, {id = branch.id, work_type = branch.work_type, work_item = branch.work_item or "Default"})
+		end
+		table.insert(variants, {id = variant.id, name = variant.name, work_branches = branches})
+	end
+	return {
+		id = asset.id, name = asset.name, safe_name = asset.safe_name, type = asset.type,
+		owner = asset.owner or "", created = asset.created, description = asset.description or "",
+		variants = variants
+	}
+end
+
+local function index_entry(asset)
+	return {id = asset.id, name = asset.name, safe_name = asset.safe_name, type = asset.type, owner = asset.owner or "", created = asset.created, description = asset.description or ""}
+end
+
+local function save_index_entry(root, asset)
+	local path = type_index_path(root, asset.type)
+	local data = Metadata.read(path, {assets = {}})
+	data.assets = data.assets or {}
+	local replaced = false
+	for i, entry in ipairs(data.assets) do
+		if entry.id == asset.id then data.assets[i] = index_entry(asset); replaced = true; break end
+	end
+	if not replaced then table.insert(data.assets, index_entry(asset)) end
+	return Metadata.write(path, data)
+end
+
+local function remove_index_entry(root, asset)
+	local path = type_index_path(root, asset.type)
+	local data = Metadata.read(path, {assets = {}})
+	local kept = {}
+	for _, entry in ipairs(data.assets or {}) do
+		if entry.id ~= asset.id then table.insert(kept, entry) end
+	end
+	data.assets = kept
+	return Metadata.write(path, data)
+end
+
+local function persist_asset(root, asset)
+	ensure_hierarchy(asset)
+	local ok = Metadata.write(manifest_path(root, asset), manifest_record(asset))
+	for _, variant in ipairs(asset.variants or {}) do
+		for _, branch in ipairs(variant.work_branches or {}) do
+			local path = branch_metadata_path(root, asset, variant, branch)
+			if branch.workfiles ~= nil or branch.publishes ~= nil or not Paths.exists(path) then
+				ok = write_branch(root, asset, variant, branch) and ok
+			end
 		end
 	end
-	return false
+	return save_index_entry(root, asset) and ok
+end
+
+local function read_asset(root, entry)
+	local path = Paths.join(metadata_root(root), Assets.type_dir(entry.type), entry.safe_name or Paths.safe_name(entry.name), "asset.json")
+	local asset = Metadata.read(path, nil)
+	if not asset then return nil end
+	asset.safe_name = asset.safe_name or Paths.safe_name(asset.name)
+	asset.type = asset.type or entry.type
+	ensure_hierarchy(asset)
+	return asset
+end
+
+local function ensure_migrated(root)
+	if Paths.exists(migration_path(root)) or not Paths.exists(assets_path(root)) then return end
+	local legacy = Metadata.read(assets_path(root), {assets = {}})
+	local custom = Assets.load_custom_types(root)
+	custom.types = custom.types or {}
+	local known = {}
+	for _, name in ipairs(default_types) do known[name] = true end
+	for _, name in ipairs(custom.types) do known[name] = true end
+	for _, asset in ipairs(legacy.assets or {}) do
+		if asset.type and not known[asset.type] then table.insert(custom.types, asset.type); known[asset.type] = true end
+		persist_asset(root, asset)
+	end
+	Assets.save_custom_types(root, custom)
+	Metadata.write(migration_path(root), {source = "assets.json", migrated = os.date("%Y-%m-%d %H:%M:%S")})
+end
+
+function Assets.load(root)
+	ensure_migrated(root)
+	local data = {assets = {}}
+	local seen = {}
+	local candidates = {"Character", "Prop", "Environment"}
+	local custom = Assets.load_custom_types(root)
+	for _, name in ipairs(custom.types or {}) do table.insert(candidates, name) end
+	for _, asset_type in ipairs(candidates) do
+		if not seen[asset_type] then
+			seen[asset_type] = true
+			for _, entry in ipairs((Metadata.read(type_index_path(root, asset_type), {assets = {}}).assets or {})) do
+				local asset = read_asset(root, entry)
+				if asset then table.insert(data.assets, asset) end
+			end
+		end
+	end
+	return data
+end
+
+function Assets.save(root, data)
+	for _, asset in ipairs((data and data.assets) or {}) do persist_asset(root, asset) end
+	return true
+end
+
+function Assets.list(root)
+	return Assets.load(root).assets
+end
+
+function Assets.create(root, name, asset_type, owner, description, work_types)
+	local asset = build_asset(name, asset_type, owner, description, work_types)
+	persist_asset(root, asset)
+	return asset
+end
+
+function Assets.create_cached(root, assets, name, asset_type, owner, description, work_types)
+	local asset = Assets.create(root, name, asset_type, owner, description, work_types)
+	if assets then table.insert(assets, asset) end
+	return asset
+end
+
+function Assets.branch_item(root, asset, variant, branch)
+	if not branch then branch, variant, asset, root = variant, asset, root, nil end
+	if not asset or not variant or not branch then return nil end
+	local stored = root and Metadata.read(branch_metadata_path(root, asset, variant, branch), {}) or {}
+	branch.latest_version = stored.latest_version or branch.latest_version or 0
+	branch.version_counter = stored.version_counter or branch.version_counter or branch.latest_version or 0
+	branch.workfiles = stored.workfiles or branch.workfiles or {}
+	branch.publishes = stored.publishes or branch.publishes or {}
+	branch.live_publish = stored.live_publish or branch.live_publish
+	branch.preview_path = stored.preview_path or branch.preview_path or ""
+	return {
+		id = asset.id, kind = "asset", name = asset.name, safe_name = asset.safe_name, type = asset.type,
+		owner = asset.owner, created = asset.created, description = asset.description, variant = variant.name,
+		work_type = branch.work_type, work_item = branch.work_item, latest_version = branch.latest_version,
+		version_counter = branch.version_counter, workfiles = branch.workfiles, publishes = branch.publishes,
+		live_publish = branch.live_publish, preview_path = branch.preview_path or "",
+		_source_asset = asset, _source_variant = variant, _source_branch = branch
+	}
+end
+
+function Assets.update(root, updated)
+	if updated and updated._source_branch then
+		local branch = updated._source_branch
+		branch.latest_version = updated.latest_version or 0
+		branch.version_counter = updated.version_counter or branch.version_counter or 0
+		branch.workfiles = updated.workfiles or {}
+		branch.publishes = updated.publishes or {}
+		branch.live_publish = updated.live_publish
+		branch.preview_path = updated.preview_path or ""
+		return write_branch(root, updated._source_asset, updated._source_variant, branch)
+	end
+	return updated and persist_asset(root, updated) or false
+end
+
+function Assets.delete(root, id, session)
+	local asset = Assets.find(root, id)
+	if not asset then return false, "Asset was not found." end
+	Recycle.move(root, asset_base_folder(root, asset), session)
+	Recycle.move(root, asset_metadata_folder(root, asset), session)
+	return remove_index_entry(root, asset)
+end
+
+function Assets.delete_type(root, type_name, session)
+	if not type_name or type_name == "" then return false, "Select an asset type first." end
+	local removed = 0
+	local index = Metadata.read(type_index_path(root, type_name), {assets = {}})
+	for _, entry in ipairs(index.assets or {}) do
+		local asset = read_asset(root, entry)
+		if asset then Recycle.move(root, asset_base_folder(root, asset), session); removed = removed + 1 end
+	end
+	Recycle.move(root, Paths.join(metadata_root(root), Assets.type_dir(type_name)), session)
+	local custom = Assets.load_custom_types(root)
+	local kept = {}
+	for _, name in ipairs(custom.types or {}) do if name ~= type_name then table.insert(kept, name) end end
+	custom.types = kept
+	custom.deleted_defaults = custom.deleted_defaults or {}
+	if type_dirs[type_name] then
+		local exists = false
+		for _, name in ipairs(custom.deleted_defaults) do if name == type_name then exists = true end end
+		if not exists then table.insert(custom.deleted_defaults, type_name) end
+	end
+	Assets.save_custom_types(root, custom)
+	return true, removed
 end
 
 return Assets

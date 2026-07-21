@@ -34,7 +34,7 @@ function Flowinator:Name()
 end
 
 function Flowinator:Version()
-	return "0.9.2"
+	return "0.9.3"
 end
 
 function Flowinator:Description()

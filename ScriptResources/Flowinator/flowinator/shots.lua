@@ -389,17 +389,164 @@ function Shots.add_work_item(root, shot, work_type, work_item)
 	return Shots.update(root, shot), branch
 end
 
-function Shots.update(root, updated)
-	updated = Shots.sync_branch_item(updated) or updated
-	local data = Shots.load(root)
-	for i, shot in ipairs(data.shots) do
-		if shot.id == updated.id then
-			data.shots[i] = updated
-			Shots.save(root, data)
-			return true
+-- Shot manifests keep hierarchy only. Each work item owns its own small
+-- metadata file, containing its work and publish version history.
+local function metadata_root(root)
+	return Paths.join(root, "00_Pipeline", "Metadata", "Shots")
+end
+
+local function episode_folder(shot)
+	return Paths.safe_name((shot.episode and shot.episode ~= "") and shot.episode or "Default")
+end
+
+local function shot_metadata_folder(root, shot)
+	return Paths.join(metadata_root(root), episode_folder(shot), Paths.safe_name(shot.sequence or "Sequence"), shot.safe_name or Paths.safe_name(shot.name))
+end
+
+local function manifest_path(root, shot)
+	return Paths.join(shot_metadata_folder(root, shot), "shot.json")
+end
+
+local function branch_metadata_path(root, shot, branch)
+	return Paths.join(shot_metadata_folder(root, shot), Paths.safe_name(branch.work_type), Paths.safe_name(branch.work_item or "Default") .. ".json")
+end
+
+local function index_path(root)
+	return Paths.join(metadata_root(root), "index.json")
+end
+
+local function migration_path(root)
+	return Paths.join(metadata_root(root), ".migration.json")
+end
+
+local function branch_record(branch)
+	return {id = branch.id, work_type = branch.work_type, work_item = branch.work_item or "Default",
+		latest_version = branch.latest_version or 0, version_counter = branch.version_counter or 0,
+		workfiles = branch.workfiles or {}, publishes = branch.publishes or {},
+		live_publish = branch.live_publish, preview_path = branch.preview_path or ""}
+end
+
+local function manifest_record(shot)
+	local branches = {}
+	for _, branch in ipairs(shot.work_branches or {}) do
+		table.insert(branches, {id = branch.id, work_type = branch.work_type, work_item = branch.work_item or "Default"})
+	end
+	return {id = shot.id, kind = "shot", name = shot.name, safe_name = shot.safe_name, type = "Shot",
+		episode = shot.episode or "", sequence = shot.sequence or "", owner = shot.owner or "",
+		created = shot.created, description = shot.description or "", work_branches = branches}
+end
+
+local function index_entry(shot)
+	return {id = shot.id, name = shot.name, safe_name = shot.safe_name, episode = shot.episode or "", sequence = shot.sequence or "", owner = shot.owner or "", created = shot.created, description = shot.description or ""}
+end
+
+local function persist_shot(root, shot)
+	ensure_hierarchy(shot)
+	local ok = Metadata.write(manifest_path(root, shot), manifest_record(shot))
+	for _, branch in ipairs(shot.work_branches or {}) do
+		local path = branch_metadata_path(root, shot, branch)
+		if branch.workfiles ~= nil or branch.publishes ~= nil or not Paths.exists(path) then
+			ok = Metadata.write(path, branch_record(branch)) and ok
 		end
 	end
-	return false
+	return ok
+end
+
+local function read_shot(root, entry)
+	local path = Paths.join(metadata_root(root), episode_folder(entry), Paths.safe_name(entry.sequence or "Sequence"), entry.safe_name or Paths.safe_name(entry.name), "shot.json")
+	local shot = Metadata.read(path, nil)
+	if not shot then return nil end
+	shot.safe_name = shot.safe_name or Paths.safe_name(shot.name)
+	shot.kind = "shot"
+	ensure_hierarchy(shot)
+	return shot
+end
+
+local function save_index(root, data)
+	return Metadata.write(index_path(root), data)
+end
+
+local function ensure_migrated(root)
+	if Paths.exists(migration_path(root)) or not Paths.exists(shots_path(root)) then return end
+	local legacy = Metadata.read(shots_path(root), {shots = {}, episodes = {}, sequences = {}})
+	for _, shot in ipairs(legacy.shots or {}) do persist_shot(root, shot) end
+	local stubs = {}
+	for _, shot in ipairs(legacy.shots or {}) do table.insert(stubs, index_entry(shot)) end
+	save_index(root, {shots = stubs, episodes = legacy.episodes or {}, sequences = legacy.sequences or {}})
+	Metadata.write(migration_path(root), {source = "shots.json", migrated = os.date("%Y-%m-%d %H:%M:%S")})
+end
+
+function Shots.load(root)
+	ensure_migrated(root)
+	local index = Metadata.read(index_path(root), {shots = {}, episodes = {}, sequences = {}})
+	local data = {shots = {}, episodes = index.episodes or {}, sequences = index.sequences or {}}
+	for _, entry in ipairs(index.shots or {}) do
+		local shot = read_shot(root, entry)
+		if shot then table.insert(data.shots, shot) end
+	end
+	return data
+end
+
+function Shots.save(root, data)
+	data = data or {shots = {}, episodes = {}, sequences = {}}
+	local stubs = {}
+	for _, shot in ipairs(data.shots or {}) do
+		persist_shot(root, shot)
+		table.insert(stubs, index_entry(shot))
+	end
+	return save_index(root, {shots = stubs, episodes = data.episodes or {}, sequences = data.sequences or {}})
+end
+
+function Shots.list(root)
+	return Shots.load(root).shots
+end
+
+function Shots.create(root, name, owner, description, work_types, episode, sequence)
+	local shot = build_shot(name, owner, description, work_types, episode, sequence)
+	persist_shot(root, shot)
+	local index = Metadata.read(index_path(root), {shots = {}, episodes = {}, sequences = {}})
+	index.shots = index.shots or {}
+	table.insert(index.shots, index_entry(shot))
+	save_index(root, index)
+	return shot
+end
+
+function Shots.create_cached(root, shots, name, owner, description, work_types, episode, sequence)
+	local shot = Shots.create(root, name, owner, description, work_types, episode, sequence)
+	if shots then table.insert(shots, shot) end
+	return shot
+end
+
+function Shots.branch_item(root, shot, branch)
+	if not branch then branch, shot, root = shot, root, nil end
+	if not shot or not branch then return nil end
+	local stored = root and Metadata.read(branch_metadata_path(root, shot, branch), {}) or {}
+	branch.latest_version = stored.latest_version or branch.latest_version or 0
+	branch.version_counter = stored.version_counter or branch.version_counter or branch.latest_version or 0
+	branch.workfiles = stored.workfiles or branch.workfiles or {}
+	branch.publishes = stored.publishes or branch.publishes or {}
+	branch.live_publish = stored.live_publish or branch.live_publish
+	branch.preview_path = stored.preview_path or branch.preview_path or ""
+	return {id = shot.id, kind = "shot", name = shot.name, safe_name = shot.safe_name, type = "Shot",
+		episode = shot.episode or "", sequence = shot.sequence or "", owner = shot.owner, created = shot.created,
+		description = shot.description, work_type = branch.work_type, work_item = branch.work_item or "Default",
+		latest_version = branch.latest_version, version_counter = branch.version_counter, workfiles = branch.workfiles,
+		publishes = branch.publishes, live_publish = branch.live_publish, preview_path = branch.preview_path or "",
+		_source_shot = shot, _source_branch = branch}
+end
+
+function Shots.update(root, updated)
+	if updated and updated._source_branch then
+		local branch = updated._source_branch
+		branch.latest_version = updated.latest_version or 0
+		branch.version_counter = updated.version_counter or branch.version_counter or 0
+		branch.workfiles = updated.workfiles or {}
+		branch.publishes = updated.publishes or {}
+		branch.live_publish = updated.live_publish
+		branch.preview_path = updated.preview_path or ""
+		return Metadata.write(branch_metadata_path(root, updated._source_shot, branch), branch_record(branch))
+	end
+	return updated and persist_shot(root, updated) or false
 end
 
 return Shots
